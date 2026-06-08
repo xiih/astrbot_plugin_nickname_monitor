@@ -12,6 +12,23 @@ class NicknameChangeMonitor(Star):
         super().__init__(context)
         self.config = config
 
+    @staticmethod
+    def _normalize_whitelist(whitelist) -> list:
+        """
+        将配置中的白名单安全地归一化为字符串列表。
+        兼容用户误填单个整数 / 字符串 / None 的情况，避免 TypeError。
+        """
+        if whitelist is None:
+            return []
+        if isinstance(whitelist, (str, int)):
+            return [str(whitelist)]
+        if isinstance(whitelist, (list, tuple, set)):
+            return [str(g) for g in whitelist]
+        logger.warning(
+            f"group_whitelist 配置类型异常({type(whitelist).__name__})，已忽略白名单设置"
+        )
+        return []
+
     async def get_qq_nickname(self, event: AstrMessageEvent, group_id, qq: str) -> str:
         """
         获取 QQ 昵称。
@@ -23,40 +40,36 @@ class NicknameChangeMonitor(Star):
         try:
             raw = event.message_obj.raw_message
             if isinstance(raw, dict):
+                sender = raw.get("sender")
+                sender = sender if isinstance(sender, dict) else {}
                 nickname = (
                     raw.get("nickname")
                     or raw.get("user_name")
-                    or raw.get("sender", {}).get("nickname", "")
+                    or sender.get("nickname", "")
                 )
                 if nickname:
                     return str(nickname)
-        except Exception:
-            pass
+        except (AttributeError, KeyError, TypeError) as e:
+            logger.debug(f"从 raw_message 解析昵称失败: {e}")
 
-        bot = getattr(event, "bot", None)
-        if bot:
-            call_paths = ["api.call_action", "call_action"]
-            for path in call_paths:
-                method = bot
-                for attr in path.split('.'):
-                    method = getattr(method, attr, None)
-                    if method is None:
-                        break
-                if callable(method):
-                    try:
-                        info = await method(
-                            "get_group_member_info",
-                            group_id=int(group_id),
-                            user_id=int(qq),
-                            no_cache=True
-                        )
-                        nickname = info.get("nickname", "")
-                        if nickname:
-                            return str(nickname)
-                    except Exception as e:
-                        logger.warning(
-                            f"通过 {path} 获取昵称失败: group={group_id}, user={qq}, error={e}"
-                        )
+        try:
+            client = event.bot
+            info = await client.api.call_action(
+                "get_group_member_info",
+                group_id=int(group_id),
+                user_id=int(qq),
+                no_cache=True,
+            )
+            nickname = info.get("nickname", "") if isinstance(info, dict) else ""
+            if nickname:
+                return str(nickname)
+        except (AttributeError, NotImplementedError):
+            logger.debug("当前适配器不支持 get_group_member_info，跳过昵称查询")
+        except Exception as e:
+            logger.warning(
+                f"调用 get_group_member_info 获取昵称失败: "
+                f"group={group_id}, user={qq}, error={e}"
+            )
 
         logger.warning(f"获取 QQ 昵称失败，将使用 QQ 号兜底: group={group_id}, user={qq}")
         return qq
@@ -69,6 +82,7 @@ class NicknameChangeMonitor(Star):
         raw = event.message_obj.raw_message
         if not isinstance(raw, dict):
             return
+
         if raw.get("notice_type") != "group_card":
             return
 
@@ -77,11 +91,10 @@ class NicknameChangeMonitor(Star):
         qq = str(raw.get("user_id", ""))
         group_id = raw.get("group_id")
 
-        whitelist = self.config.get("group_whitelist", [])
-        if whitelist:
-            if str(group_id) not in [str(g) for g in whitelist]:
-                logger.debug(f"群 {group_id} 不在白名单中，跳过播报")
-                return
+        whitelist = self._normalize_whitelist(self.config.get("group_whitelist", []))
+        if whitelist and str(group_id) not in whitelist:
+            logger.debug(f"群 {group_id} 不在白名单中，跳过播报")
+            return
 
         qq_nickname = None
         if not old_name or not new_name:
@@ -105,30 +118,23 @@ class NicknameChangeMonitor(Star):
                 "🌸 叮！{old} 决定重新做人……啊不对，重新叫 {new} 啦！",
                 "❄ {old} 把名字藏起来了，现在请叫我 {new} ～",
                 "📛 旧名回收站：{old} 已清理。🎉 新名上线：{new}！",
-                "🔔 群聊震动！{old} 换上了闪亮新马甲：{new} 💎"
+                "🔔 群聊震动！{old} 换上了闪亮新马甲：{new} 💎",
             ]
 
         chosen_text = random.choice(texts)
         text = chosen_text.format(old=old_name, new=new_name, qq=qq)
 
         chain = [Plain(text)]
+
         if qq:
-            avatar_url = f"https://q1.qlogo.cn/g?b=qq&nk={qq}&s=640"
-            chain.append(Image.fromURL(avatar_url))
+            try:
+                avatar_url = f"https://q1.qlogo.cn/g?b=qq&nk={qq}&s=640"
+                chain.append(Image.fromURL(avatar_url))
+            except Exception as e:
+                logger.debug(f"头像构建失败，将仅发送文本: {e}")
 
         try:
-            if event.get_group_id():
-                yield event.chain_result(chain)
-            elif group_id:
-                platform = event.get_platform()
-                if platform:
-                    umo = f"{platform}:group_{group_id}"
-                    await self.context.send_message(umo, chain)
-                    logger.info(f"主动发送消息到群 {group_id}")
-                else:
-                    logger.error("无法确定当前平台，消息未发送")
-            else:
-                logger.error("无法确定目标群，消息未发送")
+            yield event.chain_result(chain)
         except Exception as e:
             logger.error(f"发送播报失败: {e}")
 
