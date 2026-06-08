@@ -1,0 +1,25 @@
+{
+  "enabled": {
+    "description": "是否启用群昵称修改监控",
+    "type": "bool",
+    "default": true
+  },
+  "group_whitelist": {
+    "description": "群聊白名单，空列表表示所有群都监控，否则仅监控列表中的群号（支持整数或字符串）",
+    "type": "list",
+    "default": []
+  },
+  "custom_texts": {
+    "description": "自定义播报文案列表（支持占位符 {old}、{new}、{qq}），随机选一条发送",
+    "type": "list",
+    "default": [
+      "✨ 叮咚！{old} 摇身一变成了 {new}！是不是偷偷转职啦？(≧▽≦)",
+      "🎈 哇～ {old} 悄悄换了个新名片：{new} ！快看快看～",
+      "🍭 捕捉到一只改名怪！{old} → {new} 可爱度+10 ✨",
+      "🌸 叮！{old} 决定重新做人……啊不对，重新叫 {new} 啦！",
+      "❄ {old} 把名字藏起来了，现在请叫我 {new} ～ ",
+      "📛 旧名回收站：{old} 已清理。🎉 新名上线：{new}！",
+      "🔔 群聊震动！{old} 换上了闪亮新马甲：{new} 💎"
+    ]
+  }
+}

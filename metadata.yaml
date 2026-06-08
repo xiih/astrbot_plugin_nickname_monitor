@@ -1,0 +1,4 @@
+"name": "astrbot_plugin_nickname_monitor"
+"author": "若梦"
+"description": "监听群成员修改群昵称（群名片）事件，发送调皮可爱的播报消息"
+"version": "1.0.0"
